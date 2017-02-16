@@ -1,4 +1,4 @@
-package ATP;
+package es.atp;
 import robocode.*;
 import robocode.util.*;
 import java.util.*;

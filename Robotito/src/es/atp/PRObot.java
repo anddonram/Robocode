@@ -2,13 +2,14 @@ package es.atp;
 
 import robocode.AdvancedRobot;
 import robocode.BulletHitEvent;
+import robocode.BulletMissedEvent;
 import robocode.Condition;
 import robocode.CustomEvent;
 import robocode.HitByBulletEvent;
+import robocode.HitRobotEvent;
 import robocode.HitWallEvent;
 import robocode.ScannedRobotEvent;
 import robocode.StatusEvent;
-import robocode.WinEvent;
 
 public class PRObot extends AdvancedRobot {
 
@@ -16,16 +17,22 @@ public class PRObot extends AdvancedRobot {
 	double eDistance = 0.0;
 	double eEnergy = 100.0;
 	double eVelocity = 0.0;
-
+	double eBearing = 0.0;
 	// /**
 	// * Track enemy position
 	// */
 	double eX = 0.0;
 	double eY = 0.0;
 	double minSize;
+	double maxSize;
 	double movement = 1.0;
 	double safeDistance = 200;
 	boolean avoidWall = false;
+
+	double wallMargin;
+	double hits = 1;
+	double hitsBy = 1;
+	double missed = 1;
 
 	private double shortestAngle(double angle) {
 		double res;
@@ -43,7 +50,8 @@ public class PRObot extends AdvancedRobot {
 		setAdjustRadarForGunTurn(true);
 		setAdjustRadarForRobotTurn(true);
 		minSize = Math.min(getBattleFieldHeight(), getBattleFieldWidth());
-		double wallMargin = minSize * 0.2;
+		maxSize = Math.max(getBattleFieldHeight(), getBattleFieldWidth());
+		wallMargin = minSize * 0.2;
 		addCustomEvent(new Condition("avoid_wall") {
 			public boolean test() {
 				return getX() <= wallMargin || getX() >= getBattleFieldWidth() - wallMargin || getY() <= wallMargin
@@ -61,29 +69,26 @@ public class PRObot extends AdvancedRobot {
 
 	@Override
 	public void onScannedRobot(ScannedRobotEvent e) {
-		if (!avoidWall) {
-			double deltaEnergy = eEnergy - e.getEnergy();
-			updateEnemy(e);
-			rotate(e);
-			moveGun(e.getBearing());
-			move(e, deltaEnergy);
-			moveRadar(e.getBearing());
-			execute();
-		} else if (getDistanceRemaining() < 20) {
-			avoidWall = false;
-		}
+
+		double deltaEnergy = eEnergy - e.getEnergy();
+		updateEnemy(e);
+		rotate(e);
+		moveGun(e.getBearing());
+		move(e, deltaEnergy);
+		moveRadar(e.getBearing());
+		execute();
+
 	}
 
 	private void rotate(ScannedRobotEvent e) {
 		double angle = e.getBearing() + 90;
 
-		 double d = Math.signum(shortestAngle(angle));
-		if (eDistance > minSize / 2) {
-			angle += 10 * movement*d;
+		if (eDistance > minSize / 3 || avoidWall) {
+			angle -= 15 * movement;
 			System.out.println(angle);
 		} else if (eDistance < safeDistance) {
 			System.out.println("seguridad:" + safeDistance);
-			angle -= 10 * movement*d;
+			angle += 15 * movement;
 		}
 		System.out.println("gira esto : " + angle);
 
@@ -93,10 +98,10 @@ public class PRObot extends AdvancedRobot {
 	private void move(ScannedRobotEvent e, double deltaEnergy) {
 
 		// dodge if enemy's shooting
-		if (deltaEnergy > 0.1 && deltaEnergy < 3.1) {
+		if ((deltaEnergy > 0.1 && deltaEnergy < 3.1) || Math.abs(eHeading) < 5) {
 
-			setAhead(e.getDistance() / 3 * movement);
-
+			setAhead(eDistance / 60 * (30 - (20 * eDistance / maxSize)) * movement);
+			System.out.println();
 			// if (getX() <= getBattleFieldWidth() * 0.25 || getX() >=
 			// getBattleFieldWidth() * 0.75
 			// || getY() <= getBattleFieldHeight() * 0.25 || getY() >=
@@ -111,6 +116,7 @@ public class PRObot extends AdvancedRobot {
 		eHeading = e.getHeading();
 		eEnergy = e.getEnergy();
 		eDistance = e.getDistance();
+		eBearing = e.getBearing();
 		eX = getX() + eDistance * Math.cos(getRadarHeading());
 		eY = getY() + eDistance * Math.sin(getRadarHeading());
 	}
@@ -123,68 +129,70 @@ public class PRObot extends AdvancedRobot {
 	private void moveGun(double bearing) {
 		double absBearing = bearing + getHeading();
 		double gunTurn = absBearing - getGunHeading();
-		double extra = Math.random() * 5 * (eVelocity > 0 ? 1 : -1);
+		double extra = Math.random() * 1.5 * eVelocity;
 		gunTurn += extra;
 		setTurnGunRight(shortestAngle(gunTurn));
-		if (eDistance > safeDistance)
-			setFire(1 + (1 - eDistance / minSize));
-		else {
-			setFire(3);
-		}
+		if (missed <= hits || hitsBy > hits || eDistance < 100 || eEnergy < 10
+				|| Math.random() < hits / (missed + hitsBy))
+			if (eDistance > 100)
+				setFire(1 + (1 - eDistance / minSize));
+			else {
+				setFire(3);
+			}
 	}
 
 	@Override
 	public void onHitByBullet(HitByBulletEvent event) {
-		safeDistance += event.getPower() * 5;
+		hitsBy++;
+		safeDistance += event.getPower();
+		safeDistance = Math.min(safeDistance, minSize / 4);
+		if (!(getX() <= wallMargin || getX() >= getBattleFieldWidth() - wallMargin || getY() <= wallMargin
+				|| getY() >= getBattleFieldHeight() - wallMargin)) {
+			movement = -movement;
+		}
+	}
+
+	@Override
+	public void onBulletMissed(BulletMissedEvent event) {
+		missed++;
+
 	}
 
 	@Override
 	public void onHitWall(HitWallEvent event) {
-		// if (getVelocity() == 0) {
-		// avoidWall = true;
-		// movement = -movement;
-		// wallBearing = event.getBearing();
-		// System.out.println("auch" + movement);
-		// }
-		// setTurnRight((90 + event.getBearing()));
-		// setAhead(200);
+		avoidWall = true;
+		movement = -movement;
+		setAhead(movement * 200);
 	}
 
 	public void onCustomEvent(CustomEvent e) {
 		if (e.getCondition().getName().equals("avoid_wall"))
 			if (!avoidWall) {
-				// switch directions and move away
 				avoidWall = true;
-				System.out.println("x: " + ((getBattleFieldWidth() / 2) - getX()) + ", y: "
-						+ ((getBattleFieldHeight() / 2) - getY()));
-				double angle = (Math.atan2((getBattleFieldHeight() / 2) - getY(), (getBattleFieldWidth() / 2) - getX())
-						/ Math.PI + 1) * 180;
-				System.out.println("angulo: " + angle);
 				movement = -movement;
-
-				setTurnRight(270 - angle - getHeading());
-				setAhead(minSize / 3);
-				execute();
-
-				System.out.println("meh: " + movement);
-			} else if (getDistanceRemaining() < 20) {
+			} else if (Math.abs(getDistanceRemaining()) < 5) {
 				avoidWall = false;
 			}
 	}
 
 	@Override
 	public void onBulletHit(BulletHitEvent e) {
+		hits++;
 		eEnergy = e.getEnergy();
 		eX = e.getBullet().getX();
 		eY = e.getBullet().getY();
+
 		if (eEnergy < getEnergy()) {
-			safeDistance -= e.getBullet().getPower() * 4;
+			safeDistance -= e.getBullet().getPower();
 		}
 	}
 
 	@Override
-	public void onWin(WinEvent event) {
-		setStop();
+	public void onHitRobot(HitRobotEvent e) {
+		setFire(3);
+		setTurnRight(shortestAngle(e.getBearing() + 90));
+		setAhead(safeDistance * movement);
 		execute();
+
 	}
 }
